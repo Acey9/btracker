@@ -45,7 +45,7 @@ forever:
 }
 
 func sayHi() {
-	bts.logger.Info("%s : Netlab botnet track System - Bot Worker", bts.settings.Title)
+	bts.logger.Info("%s : BT System - Bot Worker", bts.settings.Title)
 }
 
 func initBotServer() {
