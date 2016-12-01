@@ -14,6 +14,7 @@ import (
 var bts BotServer
 
 type BotServer struct {
+	Debug        bool
 	settingsFile string
 	settings     *BotSettings
 	logger       *logs.BeeLogger
@@ -44,7 +45,7 @@ forever:
 }
 
 func sayHi() {
-	bts.logger.Info("%s : BT System - Bot Worker", bts.settings.Title)
+	bts.logger.Info("%s : Netlab botnet track System - Bot Worker", bts.settings.Title)
 }
 
 func initBotServer() {
@@ -65,6 +66,11 @@ func initBotServer() {
 	}
 	bts.etcdctl = etcdctl
 
+	if bts.Debug {
+		bts.settings.ETCD.RootPath = "/btracker/debug"
+	}
+	fmt.Println(bts.settings.ETCD.RootPath)
+
 	bts.worker = NewWorker()
 	bts.manager = NewManager()
 }
@@ -83,7 +89,8 @@ func initLogger() {
 }
 
 func optParse() {
-	flag.StringVar(&bts.settingsFile, "c", "../etc/bot.conf", "Look for bot config file in this directory")
+	flag.StringVar(&bts.settingsFile, "c", "../../etc/bot.debug.conf", "Look for bot config file in this directory")
+	flag.BoolVar(&bts.Debug, "d", false, "Only debug")
 	flag.Parse()
 }
 

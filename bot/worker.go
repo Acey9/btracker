@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 )
 
@@ -13,6 +12,7 @@ type Worker struct {
 	bots     map[string]*Bot
 	addQueue chan *Bot
 	delQueue chan *Bot
+	startTS  int64
 }
 
 func NewWorker() *Worker {
@@ -20,13 +20,14 @@ func NewWorker() *Worker {
 	if err != nil {
 		hostname = ""
 	}
-	worker := &Worker{hostname, 0, make(map[string]*Bot), make(chan *Bot), make(chan *Bot)}
+	now := time.Now()
+	worker := &Worker{hostname, 0, make(map[string]*Bot), make(chan *Bot), make(chan *Bot), now.Unix()}
 	return worker
 }
 
 func (w *Worker) Handler() {
 	go w.work()
-	go w.heartbeat()
+	go w.heartBeat()
 }
 
 func (w *Worker) StartBot(b *Bot) {
@@ -64,12 +65,18 @@ func (w *Worker) work() {
 	}
 }
 
-func (w *Worker) heartbeat() {
+func (w *Worker) heartBeat() {
 	bts.logger.Notice("Start <heartBeat:%s>", w.Name)
 	key := fmt.Sprintf("%s/heartbeat/%s", bts.settings.ETCD.RootPath, w.Name)
 	for {
 		bts.logger.Info("Beat <worker:%s> %d", w.Name, w.count)
-		bts.etcdctl.SetWithTTL(key, strconv.Itoa(w.count), false, time.Second*12)
-		time.Sleep(time.Second * 8)
+
+		sysinfo := NewSysInfo()
+		info := fmt.Sprintf("%d\t%.2f\t%d\t%.2f\t%s\t%d\t%.2f\t%d", w.count, sysinfo.CPU[0], sysinfo.VMem.Free, sysinfo.VMem.UsedPercent, sysinfo.Load.String(), sysinfo.Disk.Free, sysinfo.Disk.UsedPercent, w.startTS)
+
+		bts.etcdctl.SetWithTTL(key, info, false, time.Second*time.Duration(bts.settings.BotHeartbeatTTL))
+
+		_sleep := bts.settings.BotHeartbeatTTL / 2
+		time.Sleep(time.Second * time.Duration(_sleep))
 	}
 }

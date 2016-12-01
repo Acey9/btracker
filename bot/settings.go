@@ -6,12 +6,13 @@ import (
 )
 
 type BotSettings struct {
-	Title      string
-	Version    string
-	Debug      bool
-	BotBinPath string
-	Log        LogSettings
-	ETCD       ETCDSettings
+	Title           string
+	Version         string
+	BotBinPath      string
+	BotHeartbeatTTL int
+	DiskPath        string
+	Log             LogSettings
+	ETCD            ETCDSettings
 }
 
 func NewSettings(settingsFile string, settings *BotSettings) error {
