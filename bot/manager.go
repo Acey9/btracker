@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/md5"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -29,11 +28,9 @@ func (m *Manager) Handler() {
 		bts.logger.Debug("bot config:%s", resp)
 		cmds := strings.Split(resp, ";")
 		for _, cmd := range cmds {
-			go m.botStart(cmd)
+			go bts.worker.StartBot(cmd)
 		}
 	}
-
-	//go m.monitor()
 
 	//TODO very dangerous interface
 	go m.watchCmd()
@@ -70,6 +67,11 @@ func (m *Manager) execCommand(cmdStr string) {
 	}
 	bts.logger.Debug("exec: %s", cmdStr)
 
+	if args[0] == "msync" {
+		m.ManualSync()
+		return
+	}
+
 	var out bytes.Buffer
 
 	//cmdPath := fmt.Sprintf("./bin/%s", args[0])
@@ -94,52 +96,30 @@ func (m *Manager) configChange(resp *etcd.Response, err error) {
 	if err != nil {
 		return
 	}
-	if resp.Node.Value == "" || resp.Node.Value == resp.PrevNode.Value {
+	if resp.Node.Value == resp.PrevNode.Value {
 		return
 	}
 	bts.logger.Notice("config changed.")
-	adds := Difference(strings.Split(resp.Node.Value, ";"), strings.Split(resp.PrevNode.Value, ";"))
-	for _, cmdStr := range adds {
-		go m.botStart(cmdStr)
-	}
 
 	dels := Difference(strings.Split(resp.PrevNode.Value, ";"), strings.Split(resp.Node.Value, ";"))
+	bts.logger.Info("delete cnc:%d", len(dels))
+
 	for _, cmdStr := range dels {
-		go m.botStop(cmdStr)
-	}
-}
-
-func (m *Manager) botStop(cmdStr string) {
-	bid := m.getBotID(cmdStr)
-	bot, ok := bts.worker.bots[bid]
-	if ok {
-		bts.worker.StopBot(bot)
-	}
-}
-
-func (m *Manager) getBotID(cmdStr string) string {
-	bid := fmt.Sprintf("%x", md5.Sum([]byte(cmdStr)))
-	return bid
-}
-
-func (m *Manager) botStart(cmdStr string) {
-	bid := m.getBotID(cmdStr)
-	args, err := Split(cmdStr)
-	if err != nil {
-		bts.logger.Error("bot start failed:%s", err)
-		return
+		if cmdStr == "" {
+			continue
+		}
+		go bts.worker.StopBot(cmdStr)
 	}
 
-	cmdPath := fmt.Sprintf("%s/%s", bts.settings.BotBinPath, args[0])
-	cmd := exec.Command(cmdPath, args[1:]...)
-
-	err = cmd.Start()
-	if err != nil {
-		bts.logger.Error("bot start failed:%s", err)
-		return
+	adds := Difference(strings.Split(resp.Node.Value, ";"), strings.Split(resp.PrevNode.Value, ";"))
+	bts.logger.Info("new cnc:%d", len(adds))
+	for _, cmdStr := range adds {
+		if cmdStr == "" {
+			continue
+		}
+		go bts.worker.StartBot(cmdStr)
 	}
-	bot := NewBot(bid, cmdStr, cmd)
-	bts.worker.StartBot(bot)
+
 }
 
 func (m *Manager) getFromETCD(key string) (string, error) {
@@ -163,22 +143,16 @@ func (m *Manager) GetConfig() (string, error) {
 	return m.getFromETCD(key)
 }
 
-func (m *Manager) monitor() {
-	bts.logger.Notice("Start <monitor:%s>", m.Name)
-	for {
-		for _, bot := range bts.worker.bots {
-			alive := bot.Alive()
-			//bts.logger.Debug("pid:%d alive:%t", bot.cmd.Process.Pid, alive)
-			if !alive {
-				bts.worker.DelBot(bot)
-			}
-		}
-		time.Sleep(time.Second * 5)
+func (m *Manager) ManualSync() {
+	key := bts.settings.ETCD.RootPath + "/conf/" + m.Name
+	values, _ := m.getFromETCD(key)
+	for _, cmdStr := range strings.Split(values, ";") {
+		go bts.worker.CheckBot(cmdStr)
 	}
 }
 
 func (m *Manager) StopAllBot() {
 	for _, bot := range bts.worker.bots {
-		bts.worker.StopBot(bot)
+		bts.worker.StopBot(bot.cmdStr)
 	}
 }

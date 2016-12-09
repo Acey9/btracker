@@ -1,18 +1,22 @@
 package main
 
 import (
+	"crypto/md5"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 )
 
 type Worker struct {
-	Name     string
-	count    int
-	bots     map[string]*Bot
-	addQueue chan *Bot
-	delQueue chan *Bot
-	startTS  int64
+	Name            string
+	count           int
+	bots            map[string]*Bot
+	startQueue      chan *Bot
+	delBotsMapQueue chan *Bot
+	checkQueue      chan string
+	stopQueue       chan string
+	startTS         int64
 }
 
 func NewWorker() *Worker {
@@ -21,7 +25,7 @@ func NewWorker() *Worker {
 		hostname = ""
 	}
 	now := time.Now()
-	worker := &Worker{hostname, 0, make(map[string]*Bot), make(chan *Bot), make(chan *Bot), now.Unix()}
+	worker := &Worker{hostname, 0, make(map[string]*Bot), make(chan *Bot), make(chan *Bot), make(chan string), make(chan string), now.Unix()}
 	return worker
 }
 
@@ -30,36 +34,75 @@ func (w *Worker) Handler() {
 	go w.heartBeat()
 }
 
-func (w *Worker) StartBot(b *Bot) {
-	w.addQueue <- b
+func (w *Worker) botInit(cmdStr string) (*Bot, error) {
+	bid := w.GetBotID(cmdStr)
+	args, err := Split(cmdStr)
+	if err != nil {
+		bts.logger.Error("bot start failed:%s", err)
+		return nil, err
+	}
+
+	cmdPath := fmt.Sprintf("%s/%s", bts.settings.BotBinPath, args[0])
+	cmd := exec.Command(cmdPath, args[1:]...)
+
+	err = cmd.Start()
+	if err != nil {
+		bts.logger.Error("bot start failed:%s", err)
+		return nil, err
+	}
+	return NewBot(bid, cmdStr, cmd), nil
+}
+
+func (w *Worker) StartBot(cmdStr string) {
+	b, err := w.botInit(cmdStr)
+	if err != nil {
+		return
+	}
+	w.startQueue <- b
 	bts.logger.Notice("Start <Bot:%s> %s", b.bid, b.cmdStr)
 	b.cmd.Process.Wait()
-	w.delQueue <- b
-	bts.logger.Notice("Exit <Bot:%s> %s", b.bid, b.cmdStr)
+	w.delBotsMapQueue <- b
+	bts.logger.Notice("Stoped <Bot:%s> %s", b.bid, b.cmdStr)
 }
 
-func (w *Worker) StopBot(b *Bot) {
-	//w.delQueue <- b
-	b.Stop()
-	bts.logger.Notice("Stop <Bot:%s> %s", b.bid, b.cmdStr)
+func (w *Worker) CheckBot(cmdStr string) {
+	w.checkQueue <- cmdStr
 }
 
-func (w *Worker) DelBot(b *Bot) {
-	w.delQueue <- b
-	bts.logger.Notice("Del <Bot:%s> %s", b.bid, b.cmdStr)
+func (w *Worker) StopBot(cmdStr string) {
+	w.stopQueue <- cmdStr
+}
+
+func (w *Worker) GetBotID(cmdStr string) string {
+	bid := fmt.Sprintf("%x", md5.Sum([]byte(cmdStr)))
+	return bid
 }
 
 func (w *Worker) work() {
 	bts.logger.Notice("Start <work:%s>", w.Name)
 	for {
 		select {
-		case start := <-w.addQueue:
+		case start := <-w.startQueue:
 			w.count++
 			w.bots[start.bid] = start
 			break
-		case stop := <-w.delQueue:
+		case del := <-w.delBotsMapQueue:
 			w.count--
-			delete(w.bots, stop.bid)
+			delete(w.bots, del.bid)
+			break
+		case cmdStr := <-w.stopQueue:
+			bid := w.GetBotID(cmdStr)
+			bot, ok := w.bots[bid]
+			if ok {
+				bot.Stop()
+			}
+			break
+		case cmdStr := <-w.checkQueue:
+			bid := w.GetBotID(cmdStr)
+			_, ok := w.bots[bid]
+			if !ok {
+				go w.StartBot(cmdStr)
+			}
 			break
 		}
 	}
