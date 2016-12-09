@@ -144,8 +144,7 @@ func (m *Manager) GetConfig() (string, error) {
 }
 
 func (m *Manager) ManualSync() {
-	key := bts.settings.ETCD.RootPath + "/conf/" + m.Name
-	values, _ := m.getFromETCD(key)
+	values, _ := m.GetConfig()
 	for _, cmdStr := range strings.Split(values, ";") {
 		go bts.worker.CheckBot(cmdStr)
 	}
