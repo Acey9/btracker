@@ -32,7 +32,6 @@ func (m *Manager) Handler() {
 		}
 	}
 
-	//TODO very dangerous interface
 	go m.watchCmd()
 
 	go m.watchConfig()
