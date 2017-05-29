@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,7 @@ type Worker struct {
 	checkQueue      chan string
 	stopQueue       chan string
 	startTS         int64
+	cntMutex        *sync.Mutex
 }
 
 func NewWorker() *Worker {
@@ -25,7 +27,17 @@ func NewWorker() *Worker {
 		hostname = ""
 	}
 	now := time.Now()
-	worker := &Worker{hostname, 0, make(map[string]*Bot), make(chan *Bot), make(chan *Bot), make(chan string), make(chan string), now.Unix()}
+	worker := &Worker{
+		hostname,
+		0,
+		make(map[string]*Bot),
+		make(chan *Bot),
+		make(chan *Bot),
+		make(chan string),
+		make(chan string),
+		now.Unix(),
+		&sync.Mutex{},
+	}
 	return worker
 }
 
@@ -83,27 +95,37 @@ func (w *Worker) work() {
 	for {
 		select {
 		case start := <-w.startQueue:
+			w.cntMutex.Lock()
+			defer w.cntMutex.Unlock()
+
 			w.count++
 			w.bots[start.bid] = start
-			break
 		case del := <-w.delBotsMapQueue:
+			w.cntMutex.Lock()
+			defer w.cntMutex.Unlock()
+
 			w.count--
 			delete(w.bots, del.bid)
-			break
 		case cmdStr := <-w.stopQueue:
 			bid := w.GetBotID(cmdStr)
+
+			w.cntMutex.Lock()
+			defer w.cntMutex.Unlock()
+
 			bot, ok := w.bots[bid]
 			if ok {
 				bot.Stop()
 			}
-			break
 		case cmdStr := <-w.checkQueue:
 			bid := w.GetBotID(cmdStr)
+
+			w.cntMutex.Lock()
+			defer w.cntMutex.Unlock()
+
 			_, ok := w.bots[bid]
 			if !ok {
 				go w.StartBot(cmdStr)
 			}
-			break
 		}
 	}
 }
@@ -115,7 +137,14 @@ func (w *Worker) heartBeat() {
 		bts.logger.Info("Beat <worker:%s> %d", w.Name, w.count)
 
 		sysinfo := NewSysInfo()
-		info := fmt.Sprintf("%d\t%.2f\t%d\t%.2f\t%s\t%d\t%.2f\t%d", w.count, sysinfo.CPU[0], sysinfo.VMem.Free, sysinfo.VMem.UsedPercent, sysinfo.Load.String(), sysinfo.Disk.Free, sysinfo.Disk.UsedPercent, w.startTS)
+		info := fmt.Sprintf("%d\t%.2f\t%d\t%.2f\t%s\t%d\t%.2f\t%d",
+			w.count, sysinfo.CPU[0],
+			sysinfo.VMem.Free,
+			sysinfo.VMem.UsedPercent,
+			sysinfo.Load.String(),
+			sysinfo.Disk.Free,
+			sysinfo.Disk.UsedPercent,
+			w.startTS)
 
 		bts.etcdctl.SetWithTTL(key, info, false, time.Second*time.Duration(bts.settings.BotHeartbeatTTL))
 
