@@ -90,42 +90,58 @@ func (w *Worker) GetBotID(cmdStr string) string {
 	return bid
 }
 
+func (w *Worker) addBot(bot *Bot) {
+	w.cntMutex.Lock()
+	defer w.cntMutex.Unlock()
+
+	w.count++
+	w.bots[bot.bid] = bot
+
+}
+
+func (w *Worker) delBot(bot *Bot) {
+	w.cntMutex.Lock()
+	defer w.cntMutex.Unlock()
+
+	w.count--
+	delete(w.bots, bot.bid)
+}
+
+func (w *Worker) stopBot(cmdStr string) {
+	bid := w.GetBotID(cmdStr)
+	w.cntMutex.Lock()
+	defer w.cntMutex.Unlock()
+
+	bot, ok := w.bots[bid]
+	if ok {
+		bot.Stop()
+	}
+}
+
+func (w *Worker) startBot(cmdStr string) {
+	bid := w.GetBotID(cmdStr)
+	w.cntMutex.Lock()
+	defer w.cntMutex.Unlock()
+
+	_, ok := w.bots[bid]
+	if !ok {
+		go w.StartBot(cmdStr)
+	}
+
+}
+
 func (w *Worker) work() {
 	bts.logger.Notice("Start <work:%s>", w.Name)
 	for {
 		select {
-		case start := <-w.startQueue:
-			w.cntMutex.Lock()
-			defer w.cntMutex.Unlock()
-
-			w.count++
-			w.bots[start.bid] = start
-		case del := <-w.delBotsMapQueue:
-			w.cntMutex.Lock()
-			defer w.cntMutex.Unlock()
-
-			w.count--
-			delete(w.bots, del.bid)
+		case bot := <-w.startQueue:
+			w.addBot(bot)
+		case bot := <-w.delBotsMapQueue:
+			w.delBot(bot)
 		case cmdStr := <-w.stopQueue:
-			bid := w.GetBotID(cmdStr)
-
-			w.cntMutex.Lock()
-			defer w.cntMutex.Unlock()
-
-			bot, ok := w.bots[bid]
-			if ok {
-				bot.Stop()
-			}
+			w.stopBot(cmdStr)
 		case cmdStr := <-w.checkQueue:
-			bid := w.GetBotID(cmdStr)
-
-			w.cntMutex.Lock()
-			defer w.cntMutex.Unlock()
-
-			_, ok := w.bots[bid]
-			if !ok {
-				go w.StartBot(cmdStr)
-			}
+			w.startBot(cmdStr)
 		}
 	}
 }
