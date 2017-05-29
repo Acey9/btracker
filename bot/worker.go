@@ -72,9 +72,9 @@ func (w *Worker) StartBot(cmdStr string) {
 	}
 	w.startQueue <- b
 	bts.logger.Notice("Start <Bot:%s> %s", b.bid, b.cmdStr)
-	b.cmd.Process.Wait()
+	err := b.cmd.Process.Wait()
 	w.delBotsMapQueue <- b
-	bts.logger.Notice("Stoped <Bot:%s> %s", b.bid, b.cmdStr)
+	bts.logger.Notice("Stoped <Bot:%s> %s info:%v", b.bid, b.cmdStr, err)
 }
 
 func (w *Worker) CheckBot(cmdStr string) {
